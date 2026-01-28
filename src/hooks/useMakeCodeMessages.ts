@@ -69,15 +69,15 @@ export function useMakeCodeMessages({
 
       // Editor content loaded - import project
       if (msg.type === 'pxthost' && msg.action === 'editorcontentloaded') {
-        onEditorReady?.();
-
         postMessage({
           type: 'pxteditor',
           action: 'setsimulatorfullscreen',
           enabled: false,
         });
 
+        // Only handle initial load, not view switches (JS/Python/Blocks)
         if (!hasImportedRef.current && currentProjectRef.current) {
+          onEditorReady?.();
           hasImportedRef.current = true;
           const messageId = `import-${Date.now()}`;
           importMessageIdRef.current = messageId;
