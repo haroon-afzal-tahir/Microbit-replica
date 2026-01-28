@@ -6,19 +6,24 @@ const MAKECODE_ORIGIN = 'https://makecode.microbit.org';
 export interface UseMakeCodeMessagesOptions {
   iframeRef: React.RefObject<HTMLIFrameElement | null>;
   initialProject: MakeCodeProject;
-  onReady?: () => void;
+  onEditorReady?: () => void;
+  onProjectLoaded?: () => void;
+  onProjectLoadError?: (error: string) => void;
   onSave?: (project: MakeCodeProject) => void;
 }
 
 export function useMakeCodeMessages({
   iframeRef,
   initialProject,
-  onReady,
+  onEditorReady,
+  onProjectLoaded,
+  onProjectLoadError,
   onSave,
 }: UseMakeCodeMessagesOptions) {
   const currentProjectRef = useRef<MakeCodeProject>(initialProject);
   const hasImportedRef = useRef(false);
   const savingEnabledRef = useRef(false);
+  const importMessageIdRef = useRef<string | null>(null);
 
   const postMessage = useCallback((message: Record<string, unknown>) => {
     iframeRef.current?.contentWindow?.postMessage(message, MAKECODE_ORIGIN);
@@ -45,6 +50,11 @@ export function useMakeCodeMessages({
       const msg = event.data;
       if (!msg || typeof msg !== 'object') return;
 
+      // Debug: log all MakeCode messages (remove in production)
+      if (process.env.NODE_ENV === 'development') {
+        console.log('[MakeCode]', msg.type, msg.action || msg.id, msg);
+      }
+
       // MakeCode asks for workspace data
       if (msg.type === 'pxthost' && msg.action === 'workspacesync') {
         postMessage({
@@ -59,7 +69,7 @@ export function useMakeCodeMessages({
 
       // Editor content loaded - import project
       if (msg.type === 'pxthost' && msg.action === 'editorcontentloaded') {
-        onReady?.();
+        onEditorReady?.();
 
         postMessage({
           type: 'pxteditor',
@@ -69,16 +79,30 @@ export function useMakeCodeMessages({
 
         if (!hasImportedRef.current && currentProjectRef.current) {
           hasImportedRef.current = true;
+          const messageId = `import-${Date.now()}`;
+          importMessageIdRef.current = messageId;
+
           postMessage({
             type: 'pxteditor',
             action: 'importproject',
+            id: messageId,
             project: currentProjectRef.current,
-            response: false,
+            response: true,
           });
+        }
+      }
 
-          setTimeout(() => {
-            savingEnabledRef.current = true;
-          }, 1000);
+      // Handle import project response
+      if (msg.type === 'pxteditor' && msg.id === importMessageIdRef.current) {
+        importMessageIdRef.current = null;
+        if (msg.success) {
+          savingEnabledRef.current = true;
+          onProjectLoaded?.();
+        } else {
+          const errorMsg = typeof msg.error === 'string'
+            ? msg.error
+            : msg.error?.message || 'Failed to import project';
+          onProjectLoadError?.(errorMsg);
         }
       }
 
@@ -94,7 +118,13 @@ export function useMakeCodeMessages({
 
     window.addEventListener('message', handleMessage);
     return () => window.removeEventListener('message', handleMessage);
-  }, [postMessage, onReady, onSave]);
+  }, [postMessage, onEditorReady, onProjectLoaded, onProjectLoadError, onSave]);
 
-  return { commands, currentProjectRef };
+  const reset = useCallback(() => {
+    hasImportedRef.current = false;
+    savingEnabledRef.current = false;
+    importMessageIdRef.current = null;
+  }, []);
+
+  return { commands, currentProjectRef, reset };
 }
