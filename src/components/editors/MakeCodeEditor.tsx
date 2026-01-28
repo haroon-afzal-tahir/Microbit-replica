@@ -1,23 +1,132 @@
 'use client';
 
-import { useState, useRef, useCallback, useEffect } from 'react';
+import { useState, useRef, useCallback, useEffect, forwardRef, useImperativeHandle } from 'react';
 import { buildMakeCodeUrl, DEFAULT_MAKECODE_PROJECT } from '@/lib/makecode/makeCodeAssets';
 import { LoadingSpinner } from './makecode/LoadingSpinner';
-import type { MakeCodeProject, MakeCodeEditorProps } from '@/types/makecode';
+import type { MakeCodeProject } from '@/types/makecode';
 
-export function MakeCodeEditor({
+// Re-export types for consumers
+export type { MakeCodeProject };
+
+export interface MakeCodeEditorRef {
+  switchToBlocks: () => void;
+  switchToJavaScript: () => void;
+  switchToPython: () => void;
+  compile: () => void;
+  openSettings: () => void;
+  openExtensions: () => void;
+  pairDevice: () => void;
+  print: () => void;
+  setHighContrast: (on: boolean) => void;
+  setGreenScreen: (on: boolean) => void;
+}
+
+export interface MakeCodeEditorProps {
+  projectId: string;
+  onError?: (error: Error) => void;
+  onSave?: () => void;
+  onSaveStatusChange?: (status: 'saving' | 'saved' | 'unsaved') => void;
+}
+
+export const MakeCodeEditor = forwardRef<MakeCodeEditorRef, MakeCodeEditorProps>(({
   projectId,
   onError,
   onSave,
-}: MakeCodeEditorProps) {
+  onSaveStatusChange,
+}, ref) => {
   const [isLoading, setIsLoading] = useState(true);
-  const [isSaving, setSaving] = useState(false);
   const [isReady, setIsReady] = useState(false);
-  const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const currentProjectRef = useRef<MakeCodeProject | null>(null);
 
   const origin = 'https://makecode.microbit.org';
+
+  // Expose commands to parent via ref
+  useImperativeHandle(ref, () => ({
+    switchToBlocks: () => {
+      if (iframeRef.current?.contentWindow) {
+        iframeRef.current.contentWindow.postMessage({
+          type: 'pxteditor',
+          action: 'switchblocks',
+        }, origin);
+      }
+    },
+    switchToJavaScript: () => {
+      if (iframeRef.current?.contentWindow) {
+        iframeRef.current.contentWindow.postMessage({
+          type: 'pxteditor',
+          action: 'switchjavascript',
+        }, origin);
+      }
+    },
+    switchToPython: () => {
+      if (iframeRef.current?.contentWindow) {
+        iframeRef.current.contentWindow.postMessage({
+          type: 'pxteditor',
+          action: 'switchpython',
+        }, origin);
+      }
+    },
+    compile: () => {
+      if (iframeRef.current?.contentWindow) {
+        iframeRef.current.contentWindow.postMessage({
+          type: 'pxteditor',
+          action: 'compile',
+          options: { native: true },
+        }, origin);
+      }
+    },
+    openSettings: () => {
+      if (iframeRef.current?.contentWindow) {
+        iframeRef.current.contentWindow.postMessage({
+          type: 'pxteditor',
+          action: 'opensettings',
+        }, origin);
+      }
+    },
+    openExtensions: () => {
+      if (iframeRef.current?.contentWindow) {
+        iframeRef.current.contentWindow.postMessage({
+          type: 'pxteditor',
+          action: 'addpackage',
+        }, origin);
+      }
+    },
+    pairDevice: () => {
+      if (iframeRef.current?.contentWindow) {
+        iframeRef.current.contentWindow.postMessage({
+          type: 'pxteditor',
+          action: 'pair',
+        }, origin);
+      }
+    },
+    print: () => {
+      if (iframeRef.current?.contentWindow) {
+        iframeRef.current.contentWindow.postMessage({
+          type: 'pxteditor',
+          action: 'print',
+        }, origin);
+      }
+    },
+    setHighContrast: (on: boolean) => {
+      if (iframeRef.current?.contentWindow) {
+        iframeRef.current.contentWindow.postMessage({
+          type: 'pxteditor',
+          action: 'sethighcontrast',
+          on,
+        }, origin);
+      }
+    },
+    setGreenScreen: (on: boolean) => {
+      if (iframeRef.current?.contentWindow) {
+        iframeRef.current.contentWindow.postMessage({
+          type: 'pxteditor',
+          action: 'setgreenscreen',
+          on,
+        }, origin);
+      }
+    },
+  }), []);
 
   // Load project from database
   useEffect(() => {
@@ -29,8 +138,13 @@ export function MakeCodeEditor({
           const data = await response.json();
           console.log('[MakeCode] Loaded from DB:', data);
           if (data.makecodeProject) {
-            console.log('[MakeCode] Using saved project data');
-            currentProjectRef.current = data.makecodeProject as MakeCodeProject;
+            const savedProject = data.makecodeProject as MakeCodeProject;
+            console.log('[MakeCode] LOADED project details:', {
+              hasBlocks: !!savedProject.text?.['main.blocks'],
+              blocksLength: savedProject.text?.['main.blocks']?.length,
+              tsCode: savedProject.text?.['main.ts']?.substring(0, 100),
+            });
+            currentProjectRef.current = savedProject;
           } else {
             console.log('[MakeCode] No saved data, using default project');
             currentProjectRef.current = {
@@ -62,28 +176,36 @@ export function MakeCodeEditor({
 
   // Save project to database
   const saveProject = useCallback(async (project: MakeCodeProject) => {
-    setSaving(true);
+    console.log('[MakeCode] SAVING to DB:', {
+      projectId,
+      hasBlocks: !!project.text?.['main.blocks'],
+      blocksLength: project.text?.['main.blocks']?.length,
+      tsCode: project.text?.['main.ts']?.substring(0, 100),
+    });
+    onSaveStatusChange?.('saving');
     try {
-      await fetch(`/api/projects/${projectId}`, {
+      const response = await fetch(`/api/projects/${projectId}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           makecodeProject: project,
         }),
       });
-      setHasUnsavedChanges(false);
+      const result = await response.json();
+      console.log('[MakeCode] Save response:', response.status, result);
+      onSaveStatusChange?.('saved');
       onSave?.();
     } catch (error) {
       console.error('[MakeCode] Failed to save project:', error);
+      onSaveStatusChange?.('unsaved');
       onError?.(error as Error);
-    } finally {
-      setSaving(false);
     }
-  }, [projectId, onError, onSave]);
+  }, [projectId, onError, onSave, onSaveStatusChange]);
 
   // Handle messages from MakeCode iframe
   useEffect(() => {
     let hasImported = false;
+    let savingEnabled = false;  // Don't save until we've imported our project
 
     function handleMessage(event: MessageEvent) {
       if (event.origin !== origin) return;
@@ -113,27 +235,58 @@ export function MakeCodeEditor({
       if (msg.type === 'pxthost' && msg.action === 'editorcontentloaded') {
         setIsReady(true);
 
+        // Try to hide the editor toolbar
+        if (iframeRef.current?.contentWindow) {
+          iframeRef.current.contentWindow.postMessage({
+            type: 'pxteditor',
+            action: 'setsimulatorfullscreen',
+            enabled: false,
+          }, origin);
+        }
+
         // Import initial project
         if (!hasImported && currentProjectRef.current && iframeRef.current?.contentWindow) {
           hasImported = true;
-          console.log('[MakeCode] Importing project into editor:', currentProjectRef.current);
+          const projectToImport = currentProjectRef.current;
+          console.log('[MakeCode] IMPORTING project:', {
+            hasBlocks: !!projectToImport.text?.['main.blocks'],
+            blocksLength: projectToImport.text?.['main.blocks']?.length,
+            tsCode: projectToImport.text?.['main.ts']?.substring(0, 100),
+            fullProject: projectToImport,
+          });
           iframeRef.current.contentWindow.postMessage({
             type: 'pxteditor',
             action: 'importproject',
-            project: currentProjectRef.current,
+            project: projectToImport,
             response: false,
           }, origin);
+
+          // Enable saving after a delay to let the import complete
+          setTimeout(() => {
+            savingEnabled = true;
+            console.log('[MakeCode] Saving now enabled');
+          }, 1000);
         }
       }
 
       // Workspace saved (user made changes)
       if (msg.type === 'pxthost' && msg.action === 'workspacesave') {
         const project = msg.project as MakeCodeProject;
-        currentProjectRef.current = project;
-        setHasUnsavedChanges(true);
+        console.log('[MakeCode] workspacesave received:', {
+          hasBlocks: !!project.text?.['main.blocks'],
+          blocksLength: project.text?.['main.blocks']?.length,
+          tsCode: project.text?.['main.ts']?.substring(0, 100),
+          savingEnabled,
+        });
 
-        // Auto-save
-        saveProject(project);
+        // Only update ref and save if we've already imported our project
+        // (prevents overwriting loaded data with MakeCode's empty default)
+        if (savingEnabled) {
+          currentProjectRef.current = project;
+          saveProject(project);
+        } else {
+          console.log('[MakeCode] Ignoring save - import not complete yet');
+        }
       }
     }
 
@@ -141,10 +294,11 @@ export function MakeCodeEditor({
     return () => window.removeEventListener('message', handleMessage);
   }, [saveProject]);
 
-  // Build iframe URL
+  // Build iframe URL with hidden header
   const iframeUrl = buildMakeCodeUrl({
     controllerId: 'microbit-replica',
     embed: true,
+    hideHeader: true,
   });
 
   if (isLoading) {
@@ -153,17 +307,6 @@ export function MakeCodeEditor({
 
   return (
     <div className="relative w-full h-full">
-      {/* Save Status Indicator */}
-      <div className="absolute top-3 right-3 z-10">
-        {isSaving ? (
-          <span className="text-sm text-gray-500 bg-white px-2 py-1 rounded shadow">Saving...</span>
-        ) : hasUnsavedChanges ? (
-          <span className="text-sm text-yellow-600 bg-white px-2 py-1 rounded shadow">Unsaved changes</span>
-        ) : (
-          <span className="text-sm text-green-600 bg-white px-2 py-1 rounded shadow">Saved</span>
-        )}
-      </div>
-
       {/* Loading overlay until MakeCode is ready */}
       {!isReady && (
         <div className="absolute inset-0 z-20">
@@ -180,4 +323,6 @@ export function MakeCodeEditor({
       />
     </div>
   );
-}
+});
+
+MakeCodeEditor.displayName = 'MakeCodeEditor';

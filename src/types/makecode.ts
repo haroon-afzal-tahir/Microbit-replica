@@ -15,10 +15,3 @@ export interface MakeCodeProject {
     [key: string]: string | undefined;
   };
 }
-
-// Editor component props
-export interface MakeCodeEditorProps {
-  projectId: string;
-  onError?: (error: Error) => void;
-  onSave?: () => void;
-}

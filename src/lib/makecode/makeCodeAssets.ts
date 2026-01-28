@@ -31,6 +31,7 @@ export const DEFAULT_MAKECODE_PROJECT: MakeCodeProject = {
 export function buildMakeCodeUrl(options: {
   controllerId?: string;
   embed?: boolean;
+  hideHeader?: boolean;
 } = {}): string {
   const params = new URLSearchParams();
   params.set('controller', '1');
@@ -41,8 +42,12 @@ export function buildMakeCodeUrl(options: {
   if (options.embed) {
     params.set('embed', '1');
   }
+  if (options.hideHeader) {
+    params.set('hideEditorToolbar', '1');
+    params.set('noheader', '1');
+  }
 
-  return `https://makecode.microbit.org/?${params.toString()}`;
+  return `https://makecode.microbit.org/?${params.toString()}#editor`;
 }
 
 export function generateProjectId(): string {
