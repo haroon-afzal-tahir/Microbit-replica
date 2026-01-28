@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useRef, useCallback, forwardRef, useImperativeHandle, useEffect } from 'react';
-import { buildMakeCodeUrl, DEFAULT_MAKECODE_PROJECT } from '@/lib/makecode/makeCodeAssets';
+import { buildMakeCodeUrl } from '@/lib/makecode/makeCodeAssets';
 import { LoadingSpinner } from './makecode/LoadingSpinner';
 import { useMakeCodeMessages } from '@/hooks/useMakeCodeMessages';
 import type { MakeCodeProject } from '@/types/makecode';
@@ -22,60 +22,47 @@ export interface MakeCodeEditorRef {
 }
 
 export interface MakeCodeEditorProps {
-  projectId: string;
-  initialProject: MakeCodeProject | null;
+  /** The project to load in the editor */
+  initialProject: MakeCodeProject;
+  /** Called when the editor is fully loaded and ready */
+  onReady?: () => void;
+  /** Called when the project changes (user edits) */
+  onChange?: (project: MakeCodeProject) => void;
+  /** Called when an error occurs */
   onError?: (error: Error) => void;
-  onSave?: () => void;
-  onSaveStatusChange?: (status: 'saving' | 'saved' | 'unsaved') => void;
 }
 
 type LoadingState = 'initializing' | 'editor-loading' | 'project-loading' | 'ready' | 'error';
 
 export const MakeCodeEditor = forwardRef<MakeCodeEditorRef, MakeCodeEditorProps>(({
-  projectId,
   initialProject,
+  onReady,
+  onChange,
   onError,
-  onSave,
-  onSaveStatusChange,
 }, ref) => {
   const [loadingState, setLoadingState] = useState<LoadingState>('initializing');
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [listenerReady, setListenerReady] = useState(false);
   const iframeRef = useRef<HTMLIFrameElement>(null);
 
-  const resolvedProject = initialProject ?? {
-    ...DEFAULT_MAKECODE_PROJECT,
-    header: { ...DEFAULT_MAKECODE_PROJECT.header, id: projectId },
-  };
+  const handleProjectLoaded = useCallback(() => {
+    setLoadingState('ready');
+    onReady?.();
+  }, [onReady]);
 
-  const saveProject = useCallback(async (project: MakeCodeProject) => {
-    onSaveStatusChange?.('saving');
-    try {
-      const response = await fetch(`/api/projects/${projectId}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ makecodeProject: project }),
-      });
-      await response.json();
-      onSaveStatusChange?.('saved');
-      onSave?.();
-    } catch (error) {
-      onSaveStatusChange?.('unsaved');
-      onError?.(error as Error);
-    }
-  }, [projectId, onError, onSave, onSaveStatusChange]);
+  const handleProjectLoadError = useCallback((error: string) => {
+    setLoadingState('error');
+    setErrorMessage(error);
+    onError?.(new Error(error));
+  }, [onError]);
 
   const { commands, reset } = useMakeCodeMessages({
     iframeRef,
-    initialProject: resolvedProject,
+    initialProject,
     onEditorReady: useCallback(() => setLoadingState('project-loading'), []),
-    onProjectLoaded: useCallback(() => setLoadingState('ready'), []),
-    onProjectLoadError: useCallback((error: string) => {
-      setLoadingState('error');
-      setErrorMessage(error);
-      onError?.(new Error(error));
-    }, [onError]),
-    onSave: saveProject,
+    onProjectLoaded: handleProjectLoaded,
+    onProjectLoadError: handleProjectLoadError,
+    onSave: onChange,
   });
 
   useImperativeHandle(ref, () => commands, [commands]);
